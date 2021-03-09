@@ -267,7 +267,7 @@ export const processJobs = async function (
         job.attrs.name,
         job.attrs._id
       );
-      runOrRetry();
+      setTimeout(runOrRetry, 0);
     } else {
       // @ts-expect-error linter complains about Date-arithmetic
       const runIn = job.attrs.nextRunAt - now;
@@ -334,7 +334,7 @@ export const processJobs = async function (
             job.attrs.name,
             job.attrs._id
           );
-          enqueueJobs(job);
+          setTimeout(() => enqueueJobs(job), 0);
         }
       }
     }
