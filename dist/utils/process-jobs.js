@@ -236,38 +236,43 @@ const processJobs = function (extraJob) {
                 if (self._processInterval) {
                     // @todo: We should check if job exists
                     const job = jobQueue.pop();
-                    const jobDefinition = definitions[job.attrs.name];
-                    if (jobDefinition.concurrency > jobDefinition.running &&
-                        self._runningJobs.length < self._maxConcurrency) {
-                        // Get the deadline of when the job is not supposed to go past for locking
-                        const lockDeadline = new Date(Date.now() - jobDefinition.lockLifetime);
-                        // This means a job has "expired", as in it has not been "touched" within the lockoutTime
-                        // Remove from local lock
-                        // NOTE: Shouldn't we update the 'lockedAt' value in MongoDB so it can be picked up on restart?
-                        if (!job.attrs.lockedAt || job.attrs.lockedAt < lockDeadline) {
-                            debug("[%s:%s] job lock has expired, freeing it up", job.attrs.name, job.attrs._id);
-                            self._lockedJobs.splice(self._lockedJobs.indexOf(job), 1);
-                            jobDefinition.locked--;
-                            jobProcessing();
-                            return;
+                    if (job) {
+                        const jobDefinition = definitions[job.attrs.name];
+                        if (jobDefinition.concurrency > jobDefinition.running &&
+                            self._runningJobs.length < self._maxConcurrency) {
+                            // Get the deadline of when the job is not supposed to go past for locking
+                            const lockDeadline = new Date(Date.now() - jobDefinition.lockLifetime);
+                            // This means a job has "expired", as in it has not been "touched" within the lockoutTime
+                            // Remove from local lock
+                            // NOTE: Shouldn't we update the 'lockedAt' value in MongoDB so it can be picked up on restart?
+                            if (!job.attrs.lockedAt || job.attrs.lockedAt < lockDeadline) {
+                                debug("[%s:%s] job lock has expired, freeing it up", job.attrs.name, job.attrs._id);
+                                self._lockedJobs.splice(self._lockedJobs.indexOf(job), 1);
+                                jobDefinition.locked--;
+                                jobProcessing();
+                                return;
+                            }
+                            // Add to local "running" queue
+                            self._runningJobs.push(job);
+                            jobDefinition.running++;
+                            // CALL THE ACTUAL METHOD TO PROCESS THE JOB!!!
+                            debug("[%s:%s] processing job", job.attrs.name, job.attrs._id);
+                            job
+                                .run()
+                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                                .then((job) => processJobResult(job))
+                                .catch((error) => {
+                                return job.agenda.emit("error", error);
+                            });
                         }
-                        // Add to local "running" queue
-                        self._runningJobs.push(job);
-                        jobDefinition.running++;
-                        // CALL THE ACTUAL METHOD TO PROCESS THE JOB!!!
-                        debug("[%s:%s] processing job", job.attrs.name, job.attrs._id);
-                        job
-                            .run()
-                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                            .then((job) => processJobResult(job))
-                            .catch((error) => {
-                            return job.agenda.emit("error", error);
-                        });
+                        else {
+                            // Run the job immediately by putting it on the top of the queue
+                            debug("[%s:%s] concurrency preventing immediate run, pushing job to top of queue", job.attrs.name, job.attrs._id);
+                            setTimeout(() => enqueueJobs(job), 0);
+                        }
                     }
                     else {
-                        // Run the job immediately by putting it on the top of the queue
-                        debug("[%s:%s] concurrency preventing immediate run, pushing job to top of queue", job.attrs.name, job.attrs._id);
-                        setTimeout(() => enqueueJobs(job), 0);
+                        setTimeout(jobProcessing, 0);
                     }
                 }
             }
